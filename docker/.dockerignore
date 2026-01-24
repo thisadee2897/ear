@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# macOS
+.DS_Store
+
+# Training outputs
+runs/
+
+# Test images (large)
+test/
+train/
+valid/
+
+# Documentation
+*.md
+!README.md
+
+# Keep only necessary files
+!hailo_dataflow_compiler-*.whl

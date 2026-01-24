@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  hailo-compiler:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: hailo-compiler
+    volumes:
+      - ..:/workspace
+      - hailo-cache:/root/.hailo
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    command: /bin/bash
+    networks:
+      - hailo-network
+
+networks:
+  hailo-network:
+    driver: bridge
+
+volumes:
+  hailo-cache:

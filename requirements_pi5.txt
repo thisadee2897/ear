@@ -1,0 +1,17 @@
+# Requirements for Raspberry Pi 5 + Hailo AI Kit
+# Install these on Raspberry Pi 5
+
+# Core dependencies (install via apt)
+# sudo apt-get install python3-opencv python3-numpy python3-picamera2
+
+# Python packages
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# Hailo Platform
+# Install from official Hailo repository:
+# https://github.com/hailo-ai/hailo-rpi5-examples
+# pip3 install hailo-platform
+
+# Picamera2 (pre-installed on Raspberry Pi OS)
+# If needed: sudo apt-get install python3-picamera2
