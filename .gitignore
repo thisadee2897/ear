@@ -72,3 +72,6 @@ docker/hailo-cache/
 # Keep these files
 !.gitkeep
 !README.md
+
+
+*.history
