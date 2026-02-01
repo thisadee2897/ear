@@ -7,7 +7,10 @@ import numpy as np
 import cv2
 import hailo
 import requests
+import threading
 from pathlib import Path
+import subprocess
+import time
 
 from hailo_apps.hailo_app_python.core.common.buffer_utils import get_caps_from_pad, get_numpy_from_buffer
 from hailo_apps.hailo_app_python.core.gstreamer.gstreamer_app import app_callback_class
@@ -15,88 +18,84 @@ from hailo_apps.hailo_app_python.apps.detection.detection_pipeline import GStrea
 
 DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/1447260795359596598/z0AycOqXHn3Douayq5BRKbZj_p3GdvrWncBbJ6hZAzFRzzwK9LpyVkmH9wNFvO0dP2RU"
 TARGET_LABEL = "ear"
-CONFIDENCE_THRESHOLD = 0.77
-REQUIRED_CONFIRMATIONS = 3
+CONFIDENCE_THRESHOLD = 0.70
 
 class user_app_callback_class(app_callback_class):
     def __init__(self):
         super().__init__()
-        self.last_sent_count = 0
-        self.stable_count = 0
-        self.confirmation_frames = 0
+        self.last_notified_id = -1 
 
-    def send_discord_alert(self, frame, current_count, confidence):
-        if current_count > self.last_sent_count:
-            image_path = "/tmp/alert.jpg"
-            cv2.imwrite(image_path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+    def send_discord_thread(self, frame, obj_id, confidence):
+        try:
+            h, w = frame.shape[:2]
+            scale = 1080 / w
+            small_frame = cv2.resize(frame, (1080, int(h * scale)))
+            small_frame_bgr = cv2.cvtColor(small_frame, cv2.COLOR_RGB2BGR)
+            
+            image_path = f"/tmp/ear_{obj_id}.jpg"
+            cv2.imwrite(image_path, small_frame_bgr)
+            
             with open(image_path, "rb") as f:
-                payload = {"content": f"**New Detection**\nCount: {current_count}\nConfidence: {confidence*100:.1f}%"}
-                files = {"file": ("detection.jpg", f, "image/jpeg")}
-                try:
-                    requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files, timeout=10)
-                    self.last_sent_count = current_count
-                except: pass
-        elif current_count < self.last_sent_count:
-            self.last_sent_count = current_count
+                payload = {"content": f" ^=^t^t **New Ear Detected**\nObject ID: {obj_id}\nConfidence: {confidence*100:.1f}%"}
+                files = {"file": ("ear.jpg", f, "image/jpeg")}
+                r = requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files, timeout=8)
+                if r.status_code in [200, 204]:
+                    print(f"Discord ID {obj_id} Sent")
+            
+            if os.path.exists(image_path):
+                os.remove(image_path)
+        except Exception as e:
+            print(f"Discord Error: {e}")
+
+    def send_discord_alert(self, frame, obj_id, confidence):
+        thread = threading.Thread(target=self.send_discord_thread, args=(frame.copy(), obj_id, confidence))
+        thread.daemon = True
+        thread.start()
 
 def app_callback(pad, info, user_data):
     buffer = info.get_buffer()
     if buffer is None: return Gst.PadProbeReturn.OK
     user_data.increment()
+    
     roi = hailo.get_roi_from_buffer(buffer)
     detections = roi.get_objects_typed(hailo.HAILO_DETECTION)
-    current_frame_ear_count = 0
-    max_confidence = 0
     
     for detection in detections:
         label = detection.get_label()
         confidence = detection.get_confidence()
-        if TARGET_LABEL in label.lower() and confidence > CONFIDENCE_THRESHOLD:
-            bbox = detection.get_bbox()
-            box_w = bbox.xmax() - bbox.xmin()
-            box_h = bbox.ymax() - bbox.ymin()
-            aspect_ratio = box_h / box_w if box_w > 0 else 0
+        
+        tracking_info = detection.get_objects_typed(hailo.HAILO_UNIQUE_ID)
+        obj_id = tracking_info[0].get_id() if tracking_info else -1
+        
+        if TARGET_LABEL in label.lower() and confidence >= CONFIDENCE_THRESHOLD:
+            if obj_id > user_data.last_notified_id:
+                format, width, height = get_caps_from_pad(pad)
+                frame = get_numpy_from_buffer(buffer, format, width, height) if format else None
+                
+                if frame is not None:
+                    user_data.last_notified_id = obj_id 
+                    user_data.send_discord_alert(frame, obj_id, confidence)
+                    break 
             
-            if aspect_ratio > 0.1 and box_h < 0.2:
-                current_frame_ear_count += 1
-                if confidence > max_confidence: max_confidence = confidence
-
-    if current_frame_ear_count != user_data.stable_count:
-        user_data.confirmation_frames = 0
-        user_data.stable_count = current_frame_ear_count
-    else:
-        user_data.confirmation_frames += 1
-
-    if user_data.confirmation_frames >= REQUIRED_CONFIRMATIONS:
-        if user_data.stable_count > 0:
-            format, width, height = get_caps_from_pad(pad)
-            frame = get_numpy_from_buffer(buffer, format, width, height) if format else None
-            if frame is not None:
-                user_data.send_discord_alert(frame, user_data.stable_count, max_confidence)
-        else:
-            user_data.last_sent_count = 0
     return Gst.PadProbeReturn.OK
 
+def force_shutter_v4l2():
+    time.sleep(8) 
+    print(" ^=^z^` NUCLEAR STRIKE: Forcing Hardware Controls...")
+    try:
+        subprocess.run(['v4l2-ctl', '-d', '/dev/v4l-subdev0', '--set-ctrl', 'exposure=2000'], check=False)
+        subprocess.run(['v4l2-ctl', '-d', '/dev/v4l-subdev0', '--set-ctrl', 'analogue_gain=150'], check=False)
+        #   ^{     ^t Auto Exposure
+        subprocess.run(['v4l2-ctl', '-d', '/dev/v4l-subdev0', '--set-ctrl', 'auto_exposure=1'], check=False) 
+        print(" ^|^e STRIKE COMPLETE: Hardware values should be locked.")
+    except Exception as e:
+        print(f" ^}^l Error during strike: {e}")
+
 if __name__ == "__main__":
-    project_root = Path(__file__).resolve().parent.parent
-    os.environ["HAILO_ENV_FILE"] = str(project_root / ".env")
     user_data = user_app_callback_class()
-    app = GStreamerDetectionApp(app_callback, user_data)
+    app = GStreamerDetectionApp(app_callback, user_data)   
+    t = threading.Thread(target=force_shutter_v4l2)
+    t.daemon = True
+    t.start()
     
-    original_get_pipeline = app.get_pipeline_string
-    def patched_get_pipeline():
-        pipeline = original_get_pipeline()
-        
-        focus_controls = "controls={AfMode=2,AfRange=2,AfSpeed=1}"
-        
-        pipeline = pipeline.replace(
-            "libcamerasrc", 
-            f"libcamerasrc extra-controls=\"controls={{{focus_controls}}}\""
-        )
-        
-        return pipeline.replace(
-            "video-sink=autovideosink", 
-            "video-sink=\"autovideosink sync=false\""
-        )
-    app.get_pipeline_string = patched_get_pipeline
     app.run()
